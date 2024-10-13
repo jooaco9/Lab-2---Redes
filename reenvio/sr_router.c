@@ -59,6 +59,39 @@ void sr_send_icmp_error_packet(uint8_t type,
   /* COLOQUE AQUÍ SU CÓDIGO*/
 
 } /* -- sr_send_icmp_error_packet -- */
+Red de destino	Máscara de subred	Puerta de enlace	Interfaz	Métrica
+192.168.1.0	    255.255.255.0	        0.0.0.0	       eth0	      1
+192.168.2.0	    255.255.255.0	    192.168.1.1	       eth1	       2
+192.168.2.4	    255.255.255.255	    192.168.1.1	       eth1	       2
+
+10.0.0.0	      255.0.0.0	        192.168.2.1	       eth1	       3
+0.0.0.0	        0.0.0.0	           192.168.1.254	   eth0	      5
+
+192.168.0.4
+192.168.2.0	
+
+
+void LPM(struct sr_instance *sr, uint32_t *destAddr) {
+	struct sr_rt* routing_table = sr->routing_table;
+	struct sr_rt* best_match = NULL;
+	uint32_t masAct = 0;
+	
+	while(routing_table) {
+		uint32_t mascara = routing_table->mask.s_addr;
+    uint32_t ipEnmascarada = destAddr & mascara;
+    
+    if (ipEnmascarada == (routing_table->dest & mascara)) {
+      if(masAct <= mascara){
+      	masAct = mascara;
+        best_match = routing_table;
+      }
+		}
+    
+    routing_table = routing_table->next;
+  } 
+
+  return best_match;
+}
 
 void sr_handle_ip_packet(struct sr_instance *sr,
         uint8_t *packet /* lent */,
@@ -67,8 +100,31 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         uint8_t *destAddr,
         char *interface /* lent */,
         sr_ethernet_hdr_t *eHdr) {
-
+        
+  sr_ip_hdr_t * cabezalIp = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
   
+  sr_if* miInterfaz = sr_get_interface(sr, interface);
+  //Si miInterfaz es distinto de 0 significa que entonces el paquete no es para mi interfaz
+  if(miInterfaz != 0){
+		struct sr_rt * matcheo = LPM(sr, cabezalIp->ip_dst);
+    if(matcheo){
+			if(cabezalIp->ip_ttl == 1){
+        //adios
+      } else {
+        cabezalIp->ip_ttl--;
+				cabezalIp->ip_sum = cksum(cabezalIp, sizeof(sr_ip_hdr_t));
+				
+      }
+
+			// -- TTL Y REENVIAR PAQUETE, TAMBIEN VER LO DE CHECKZOOM            
+    } else {
+      //No hay coincidencia en mi tabla por lo que tengo que enviar un ICMP net unreacheable
+    }
+  } else {//VER SI ES PAQUETE ICMP ECHO REQUEST Y RESPINDER CON ECHO REPLY{
+    
+    
+  }
+
 
   /* 
   * COLOQUE ASÍ SU CÓDIGO
@@ -99,16 +155,16 @@ void sr_arp_reply_send_pending_packets(struct sr_instance *sr,
   uint8_t *copyPacket;
 
   while (currPacket != NULL) {
-     ethHdr = (sr_ethernet_hdr_t *) currPacket->buf;
-     memcpy(ethHdr->ether_shost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
-     memcpy(ethHdr->ether_dhost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+    ethHdr = (sr_ethernet_hdr_t *) currPacket->buf;
+    memcpy(ethHdr->ether_shost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+    memcpy(ethHdr->ether_dhost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
 
-     copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
-     memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
+    copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
+    memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
 
-     print_hdrs(copyPacket, currPacket->len);
-     sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
-     currPacket = currPacket->next;
+    print_hdrs(copyPacket, currPacket->len);
+    sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
+    currPacket = currPacket->next;
   }
 }
 
