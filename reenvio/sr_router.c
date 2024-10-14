@@ -102,19 +102,28 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         char *interface /* lent */,
         sr_ethernet_hdr_t *eHdr) {
         
-  sr_ip_hdr_t * cabezalIp = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
+  sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
   
   sr_if* miInterfaz = sr_get_interface(sr, interface);
   //Si miInterfaz es distinto de 0 significa que entonces el paquete no es para mi interfaz
   if(miInterfaz != 0){
-		struct sr_rt * matcheo = LPM(sr, cabezalIp->ip_dst);
-    if(matcheo){
-			if(cabezalIp->ip_ttl == 1){
-        //adios
+		struct sr_rt * match = LPM(sr, ipHeader->ip_dst);
+    if(match){
+			if(ipHeader->ip_ttl <= 1){
+        // TTL es 1 o menor, enviar ICMP Time Exceeded
+        sr_send_icmp_error_packet(11, 0, sr, ipHeader->ip_dest, packet);
       } else {
+
         // creo que habria que pedir memoria y hacer una copia del paquete
-        cabezalIp->ip_ttl--;
-				cabezalIp->ip_sum = cksum(cabezalIp, sizeof(sr_ip_hdr_t));
+        ipHeader->ip_ttl--;
+				ipHeader->ip_sum = cksum(ipHeader, sizeof(sr_ip_hdr_t));
+
+        struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache.), match->gw.s_addr);
+        if (entry) {
+          // Usar la direccion MAP para entivar el paquete
+        } else {
+          // Poner en cola la solicitud ARP
+        }
 				
       }
 
@@ -122,7 +131,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     } else {
       //No hay coincidencia en mi tabla por lo que tengo que enviar un ICMP net unreacheable
     }
-  } else {//VER SI ES PAQUETE ICMP ECHO REQUEST Y RESPINDER CON ECHO REPLY{
+  } else {
+    //VER SI ES PAQUETE ICMP ECHO REQUEST Y RESPINDER CON ECHO REPLY{
     
     
   }
