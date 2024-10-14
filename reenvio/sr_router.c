@@ -71,18 +71,19 @@ Red de destino	Máscara de subred	Puerta de enlace	Interfaz	Métrica
 192.168.2.0	
 
 
-void LPM(struct sr_instance *sr, uint32_t *destAddr) {
+struct sr_rt* LPM(struct sr_instance *sr, uint32_t *destAddr) {
 	struct sr_rt* routing_table = sr->routing_table;
 	struct sr_rt* best_match = NULL;
-	uint32_t masAct = 0;
+	uint32_t longest_mask = 0;
 	
 	while(routing_table) {
-		uint32_t mascara = routing_table->mask.s_addr;
-    uint32_t ipEnmascarada = destAddr & mascara;
+		uint32_t mask = routing_table->mask.s_addr;
+    uint32_t masked_dest = destAddr & mask;
+    uint32_t masked_entry = routing_table->dest.s_addr & mask;
     
-    if (ipEnmascarada == (routing_table->dest & mascara)) {
-      if(masAct <= mascara){
-      	masAct = mascara;
+    if (masked_dest == masked_entry) {
+      if(longest_mask <= mask){
+      	longest_mask = mask;
         best_match = routing_table;
       }
 		}
@@ -111,6 +112,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 			if(cabezalIp->ip_ttl == 1){
         //adios
       } else {
+        // creo que habria que pedir memoria y hacer una copia del paquete
         cabezalIp->ip_ttl--;
 				cabezalIp->ip_sum = cksum(cabezalIp, sizeof(sr_ip_hdr_t));
 				
