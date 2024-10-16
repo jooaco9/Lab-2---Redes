@@ -58,7 +58,7 @@ void sr_send_icmp_error_packet(uint8_t type,
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   int ip_hdr_len = sizeof(sr_ip_hdr_t);
 
-struct sr_icmp_t3_hdr 
+  struct sr_icmp_t3_hdr 
   uint8_t icmp_type;
   uint8_t icmp_code;
   uint16_t icmp_sum;
@@ -70,11 +70,10 @@ struct sr_icmp_t3_hdr
   icmpHeader->icmp_type = type;
   icmpHeader->icmp_code = code;
   icmpHeader->icmp_sum = 0;
-  
+
   icmpHeader->unused = 0;
   icmpHeader->next_mtu = 0;
   memcpy(icmpHeader->data, ipPacket + sizeof(sr_ethernet_hdr_t), ICMP_DATA_SIZE);
->>>>>>> b2a14556c2a5a7b5b49daa0c32b376abcc7c2fc1
 
   /* Asignar memoria para el nuevo paquete */
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
