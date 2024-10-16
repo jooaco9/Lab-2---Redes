@@ -55,8 +55,51 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint32_t ipDst,
                               uint8_t *ipPacket)
 {
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+  int ip_hdr_len = sizeof(sr_ip_hdr_t);
 
-  /* COLOQUE AQUÍ SU CÓDIGO*/
+  /* Asignar memoria para el nuevo paquete */
+  unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
+  uint8_t *new_packet = (uint8_t *)malloc(len);
+
+  /* Copiar la cabecera Ethernet e IP del paquete original */
+  memcpy(new_packet, packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+  /* Modificar la cabecera IP */
+  sr_ip_hdr_t *new_ip_hdr = (sr_ip_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t));
+  new_ip_hdr->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
+  new_ip_hdr->ip_ttl = 64;
+  new_ip_hdr->ip_p = ip_protocol_icmp;
+  new_ip_hdr->ip_dst = ip_hdr->ip_src;
+
+  /* Encontrar la mejor coincidencia de prefijo en la tabla de enrutamiento */
+  struct sr_rt *lpm_entry = LPM(sr, ipDst);
+
+  /* Obtener la interfaz de salida */
+  struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
+  new_ip_hdr->ip_src = iface->ip;
+  new_ip_hdr->ip_sum = 0;
+  new_ip_hdr->ip_sum = checksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
+
+  /* Crear la cabecera ICMP */
+  sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  icmp_hdr->icmp_type = type;
+  icmp_hdr->icmp_code = code;
+  icmp_hdr->icmp_sum = 0;
+  icmp_hdr->unused = 0;
+  icmp_hdr->next_mtu = 0;
+
+  /* Copiar la cabecera IP original y los primeros 8 bytes del paquete original */
+  memcpy(icmp_hdr->data, ip_hdr, ip_hdr_len + 8);
+
+  /* Calcular el checksum del paquete ICMP */
+  icmp_hdr->icmp_sum = checksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
+
+  /* Enviar el paquete ICMP */
+  sr_send_packet(sr, new_packet, len, iface->name);
+
+  /* Liberar memoria */
+  free(new_packet);
 
 } /* -- sr_send_icmp_error_packet -- */
 
@@ -68,18 +111,6 @@ void sr_send_icmp_echo_reply(struct sr_instance *sr,
   /* COLOQUE AQUÍ SU CÓDIGO*/
 
 } /* -- sr_send_icmp_echo_reply -- */
-
-/* Red de destino	Máscara de subred	Puerta de enlace	Interfaz	Métrica
-   192.168.1.0	    255.255.255.0	        0.0.0.0	       eth0	      1
-   192.168.2.0	    255.255.255.0	    192.168.1.1	       eth1	       2
-   192.168.2.4	    255.255.255.255	    192.168.1.1	       eth1	       2
-
-   10.0.0.0	      255.0.0.0	        192.168.2.1	       eth1	       3
-   0.0.0.0	        0.0.0.0	           192.168.1.254	   eth0	      5
-
- 192.168.0.4
- 192.168.2.0	
-*/
 
 struct sr_rt* LPM(struct sr_instance *sr, uint32_t destAddr) {
 	struct sr_rt* routing_table = sr->routing_table;
@@ -111,10 +142,14 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         uint8_t *destAddr,
         char *interface /* lent */,
         sr_ethernet_hdr_t *eHdr){
-      
+  /*
+    Poner en el informe que no verificamos el checksum porque 
+    la funcion que llama a esta lo valida con is_valid_packet, 
+    el cual verifica en cada cabezal que el checksum esta bien
+  */ 
   print_hdrs (packet, (uint32_t) len);
   sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
-  struct sr_if * miInterfaz = sr_get_interface(sr, interface);
+  struct sr_if * miInterfaz = sr_get_interface_given_ip(sr, ipHeader->ip_dst);
   /*Si miInterfaz es igual 0 significa que entonces el paquete no es para mi router*/
   if(miInterfaz == 0){
     print_addr_ip_int (ipHeader->ip_dst);
@@ -152,6 +187,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           /* Poner en cola la solicitud ARP*/
           struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), match->gw.s_addr, newPacket, len, match->interface);
           handle_arpreq(sr, arpRequest); 
+          /*
+            Todo esto esta bien
+          */
         }
 				
       }
