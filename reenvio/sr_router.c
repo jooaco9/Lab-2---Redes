@@ -55,6 +55,22 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint32_t ipDst,
                               uint8_t *ipPacket)
 {
+struct sr_icmp_t3_hdr 
+  uint8_t icmp_type;
+  uint8_t icmp_code;
+  uint16_t icmp_sum;
+  uint16_t unused;
+  uint16_t next_mtu;
+  uint8_t data[ICMP_DATA_SIZE];
+
+  struct sr_icmp_t3_hdr *icmpHeader = (struct sr_icmp_t3_hdr *) (ipPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  icmpHeader->icmp_type = type;
+  icmpHeader->icmp_code = code;
+  icmpHeader->icmp_sum = 0;
+  
+  icmpHeader->unused = 0;
+  icmpHeader->next_mtu = 0;
+  memcpy(icmpHeader->data, ipPacket + sizeof(sr_ethernet_hdr_t), ICMP_DATA_SIZE);
 
   /* COLOQUE AQUÍ SU CÓDIGO*/
 
@@ -114,17 +130,21 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       
   print_hdrs (packet, (uint32_t) len);
   sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
-  struct sr_if * miInterfaz = sr_get_interface(sr, interface);
+  struct sr_if * miInterfaz = sr_get_interface_given_ip(sr, ipHeader->ip_dst);
   /*Si miInterfaz es igual 0 significa que entonces el paquete no es para mi router*/
   if(miInterfaz == 0){
+    fprintf(stderr,"MiInterfaz == 0, OSEA EL PAQUETE NO ES PARA MI\n");
     print_addr_ip_int (ipHeader->ip_dst);
 		struct sr_rt * match = LPM(sr, ipHeader->ip_dst);
     if(match){
+      fprintf(stderr,"SE ENCONTRO EN LA TABLA DE ENRUTAMIENTO\n");
 			if(ipHeader->ip_ttl <= 1){
+        fprintf(stderr,"el TTL es menor o igual a 1 \n");
         /* TTL es 1 o menor, enviar ICMP Time Exceeded*/
         sr_send_icmp_error_packet(11, 0, sr, ipHeader->ip_dst, packet);
       } else {
 
+        fprintf(stderr,"el ttl es mayor a 1 \n");
         /* Copia del paquete */
         uint8_t *newPacket = malloc(len);
         memcpy(newPacket, packet, len);
@@ -137,6 +157,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         print_addr_ip_int (match->gw.s_addr);
         struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), match->gw.s_addr);
         if (entry) {
+          
+          fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
           /* Usar la direccion MAC para enviar el paquete*/
           sr_ethernet_hdr_t *ethHdr = (sr_ethernet_hdr_t *) newPacket;
           print_addr_ip_int (sr_get_interface(sr, match->interface)->ip);
@@ -149,6 +171,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           /* Liberar la entrada ARP*/
           free(entry);
         } else {
+          fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
           /* Poner en cola la solicitud ARP*/
           struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), match->gw.s_addr, newPacket, len, match->interface);
           handle_arpreq(sr, arpRequest); 
@@ -157,15 +180,19 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       }
     } else {
       /*No hay coincidencia en mi tabla por lo que tengo que enviar un ICMP net unreacheable*/
+        fprintf(stderr,"No se encontro en la tabla de enrutamiento\n");
         print_addr_ip_int (ipHeader->ip_src);
         sr_send_icmp_error_packet(3, 0, sr, ipHeader->ip_src, packet);
     }
   } else {
+    fprintf(stderr,"MiInterfaz != 0\n");
     /* Verificar si es un paquete ICMP echo request y responder con echo reply*/
     if(ipHeader->ip_p == ip_protocol_icmp){
+      fprintf(stderr,"el protocolo de la ip es icmp\n");
       sr_icmp_hdr_t *icmpHeader = (sr_icmp_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
       
       if (icmpHeader->icmp_type == 8 && icmpHeader->icmp_code == 0) {  /* Echo request*/
+        fprintf(stderr,"ES UN ECHO REQUEST\n");
         sr_send_icmp_echo_reply(sr, packet, len, interface);
       } 
     }
@@ -313,7 +340,6 @@ void sr_handlepacket(struct sr_instance* sr,
   assert(sr);
   assert(packet);
   assert(interface);
-
   printf("*** -> Received packet of length %d \n",len);
 
   /* Obtengo direcciones MAC origen y destino */
