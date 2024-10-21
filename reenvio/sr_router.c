@@ -58,29 +58,20 @@ void sr_send_icmp_error_packet(uint8_t type,
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   int ip_hdr_len = sizeof(sr_ip_hdr_t);
 
-  struct sr_icmp_t3_hdr 
-  uint8_t icmp_type;
-  uint8_t icmp_code;
-  uint16_t icmp_sum;
-  uint16_t unused;
-  uint16_t next_mtu;
-  uint8_t data[ICMP_DATA_SIZE];
-
   struct sr_icmp_t3_hdr *icmpHeader = (struct sr_icmp_t3_hdr *) (ipPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
   icmpHeader->icmp_type = type;
   icmpHeader->icmp_code = code;
   icmpHeader->icmp_sum = 0;
-
   icmpHeader->unused = 0;
   icmpHeader->next_mtu = 0;
-  memcpy(icmpHeader->data, ipPacket + sizeof(sr_ethernet_hdr_t), ICMP_DATA_SIZE);
+  memcpy(icmpHeader->data, ipPacket + sizeof(sr_ethernet_hdr_t), ICMP_DATA_SIZE);   
 
   /* Asignar memoria para el nuevo paquete */
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
   uint8_t *new_packet = (uint8_t *)malloc(len);
 
   /* Copiar la cabecera Ethernet e IP del paquete original */
-  memcpy(new_packet, packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  memcpy(new_packet, ipPacket, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
   /* Modificar la cabecera IP */
   sr_ip_hdr_t *new_ip_hdr = (sr_ip_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t));
@@ -96,7 +87,7 @@ void sr_send_icmp_error_packet(uint8_t type,
   struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
   new_ip_hdr->ip_src = iface->ip;
   new_ip_hdr->ip_sum = 0;
-  new_ip_hdr->ip_sum = checksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
+  new_ip_hdr->ip_sum = ip_cksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
 
   /* Crear la cabecera ICMP */
   sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
@@ -110,7 +101,7 @@ void sr_send_icmp_error_packet(uint8_t type,
   memcpy(icmp_hdr->data, ip_hdr, ip_hdr_len + 8);
 
   /* Calcular el checksum del paquete ICMP */
-  icmp_hdr->icmp_sum = checksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
+  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
 
   /* Enviar el paquete ICMP */
   sr_send_packet(sr, new_packet, len, iface->name);
@@ -189,7 +180,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         sr_ip_hdr_t *newIpHeader = (sr_ip_hdr_t *) (newPacket + sizeof(sr_ethernet_hdr_t));
         newIpHeader->ip_ttl--;
         newIpHeader->ip_sum = 0;
-        newIpHeader->ip_sum = cksum(newIpHeader, sizeof(sr_ip_hdr_t));
+        newIpHeader->ip_sum = ip_cksum(newIpHeader, sizeof(sr_ip_hdr_t));
         print_addr_ip_int (match->gw.s_addr);
         struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), match->gw.s_addr);
         if (entry) {
