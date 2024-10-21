@@ -47,80 +47,6 @@ void sr_init(struct sr_instance* sr)
     pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
 
 } /* -- sr_init -- */
-
-/* Envía un paquete ICMP de error */
-void sr_send_icmp_error_packet(uint8_t type,
-                              uint8_t code,
-                              struct sr_instance *sr,
-                              uint32_t ipDst,
-                              uint8_t *ipPacket)
-{
-  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(ipPacket + sizeof(sr_ethernet_hdr_t));
-  int ip_hdr_len = sizeof(sr_ip_hdr_t);
-
-  /* Asignar memoria para el nuevo paquete */
-  unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
-  uint8_t *new_packet = (uint8_t *)malloc(len);
-  if (!new_packet) {
-    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
-    return;
-  }
-
-  /* Copiar la cabecera Ethernet e IP del paquete original */
-  memcpy(new_packet, ipPacket, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-
-  /* Modificar la cabecera IP */
-  sr_ip_hdr_t *new_ip_hdr = (sr_ip_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t));
-  new_ip_hdr->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
-  new_ip_hdr->ip_ttl = 64;
-  new_ip_hdr->ip_p = ip_protocol_icmp;
-  new_ip_hdr->ip_dst = ip_hdr->ip_src;
-
-  /* Encontrar la mejor coincidencia de prefijo en la tabla de enrutamiento */
-  struct sr_rt *lpm_entry = LPM(sr, ipDst);
-  if (!lpm_entry) {
-    fprintf(stderr, "Error: No se encontró una coincidencia en la tabla de enrutamiento\n");
-    free(new_packet);
-    return;
-  }
-
-  /* Obtener la interfaz de salida */
-  struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
-  new_ip_hdr->ip_src = iface->ip;
-  new_ip_hdr->ip_sum = 0;
-  new_ip_hdr->ip_sum = ip_cksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
-
-  /* Crear la cabecera ICMP */
-  sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-  icmp_hdr->icmp_type = type;
-  icmp_hdr->icmp_code = code;
-  icmp_hdr->icmp_sum = 0;
-  icmp_hdr->unused = 0;
-  icmp_hdr->next_mtu = 0;
-
-  /* Copiar la cabecera IP original y los primeros 8 bytes del paquete original */
-  memcpy(icmp_hdr->data, ip_hdr, ip_hdr_len + 8);
-
-  /* Calcular el checksum del paquete ICMP */
-  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
-
-  /* Enviar el paquete ICMP */
-  sr_send_packet(sr, new_packet, len, iface->name);
-
-  /* Liberar memoria */
-  free(new_packet);
-
-} /* -- sr_send_icmp_error_packet -- */
-
-void sr_send_icmp_echo_reply(struct sr_instance *sr,
-                             uint8_t *packet,
-                             unsigned int len,
-                             char *interface)
-{
-  /* COLOQUE AQUÍ SU CÓDIGO*/
-
-} /* -- sr_send_icmp_echo_reply -- */
-
 struct sr_rt* LPM(struct sr_instance *sr, uint32_t destAddr) {
 	struct sr_rt* routing_table = sr->routing_table;
 	struct sr_rt* best_match = NULL;
@@ -144,6 +70,103 @@ struct sr_rt* LPM(struct sr_instance *sr, uint32_t destAddr) {
   return best_match;
 }
 
+/* Envía un paquete ICMP de error */
+void sr_send_icmp_error_packet(uint8_t type,
+                              uint8_t code,
+                              struct sr_instance *sr,
+                              uint32_t ipDst,
+                              uint8_t *ipPacket)
+{
+  /* Se pide memoria para el nuevo paquete (ethernet,ip y icmp)*/
+  unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
+  uint8_t *new_packet = (uint8_t *)malloc(len);
+  if (!new_packet) {
+    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
+    return;
+  }
+
+  /* Se copia la cabecera Ethernet e IP del paquete original */
+  memcpy(new_packet, ipPacket, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+  /* Consigo la interfaz de salida que fue la misma por la que entro el paquete original*/
+  struct sr_rt *lpm_entry = LPM(sr, ipDst);
+  if (!lpm_entry) {
+    fprintf(stderr, "Error: No se encontró una coincidencia en la tabla de enrutamiento\n");
+    free(new_packet);
+    return;
+  }
+  /* Obtengo la interfaz de salida */
+  struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
+  if (!iface) {
+    fprintf(stderr, "Error: No se encontró la interfaz de salida\n");
+    free(new_packet);
+    return;
+  }
+
+  /* Se copia la dirección MAC de la interfaz de salida y 
+  la dirección MAC origen del paquete original al paquete */
+  sr_ethernet_hdr_t* ether_hdr_new_packet = (sr_ethernet_hdr_t*)new_packet;
+  sr_ethernet_hdr_t* ether_hdr_ipPacket = (sr_ethernet_hdr_t*)ipPacket;
+  memcpy(ether_hdr_new_packet->ether_shost, iface->addr, ETHER_ADDR_LEN);
+  memcpy(ether_hdr_new_packet->ether_dhost, ether_hdr_ipPacket->ether_shost, ETHER_ADDR_LEN);
+
+
+  /*Consigo el header IP del paquete original */
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(ipPacket + sizeof(sr_ethernet_hdr_t));
+  int ip_hdr_len = sizeof(sr_ip_hdr_t);
+
+  /* Consigo el header IP del nuevo paquete */
+  sr_ip_hdr_t *new_ip_hdr = (sr_ip_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t));
+
+  /* Modificar la cabecera IP */
+
+  /* Cambio la longitud del cabezal IP para agregar el ICMP*/
+  new_ip_hdr->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
+  /* Establezco el ttl en 64 (predefinido)*/
+  new_ip_hdr->ip_ttl = 64;
+  /* Cambio el protocolo a ICMP*/
+  new_ip_hdr->ip_p = ip_protocol_icmp;
+  /* Cambio la direccion IP de destino por la del paquete original*/
+  new_ip_hdr->ip_dst = ip_hdr->ip_src;
+  /* Cambio la direccion IP de origen por la de la interfaz de salida */
+  new_ip_hdr->ip_src = iface->ip;
+  
+  /* Calcular el checksum del paquete IP */
+  new_ip_hdr->ip_sum = 0;
+  new_ip_hdr->ip_sum = ip_cksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
+
+  /* Crear la cabecera ICMP */
+  sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  icmp_hdr->icmp_type = type;
+  icmp_hdr->icmp_code = code;
+  icmp_hdr->icmp_sum = 0;
+  icmp_hdr->unused = 0;
+  icmp_hdr->next_mtu = 0;
+
+  /* Se copia la cabecera IP original y los primeros 8 bytes del paquete original */
+  memcpy(icmp_hdr->data, ip_hdr, ip_hdr_len + 8);
+
+  /* Se calcula el checksum del paquete ICMP */
+  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
+
+  /* Enviar el paquete ICMP */
+  sr_send_packet(sr, new_packet, len, iface->name);
+
+  /* Liberar memoria */
+  free(new_packet);
+
+} /* -- sr_send_icmp_error_packet -- */
+
+void sr_send_icmp_echo_reply(struct sr_instance *sr,
+                             uint8_t *packet,
+                             unsigned int len,
+                             char *interface)
+{
+  /* COLOQUE AQUÍ SU CÓDIGO*/
+
+} /* -- sr_send_icmp_echo_reply -- */
+
+
 void sr_handle_ip_packet(struct sr_instance *sr,
         uint8_t *packet /* lent */,
         unsigned int len,
@@ -157,9 +180,14 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     el cual verifica en cada cabezal que el checksum esta bien
   */ 
   print_hdrs (packet, (uint32_t) len);
+  struct sr_if *iface = sr_get_interface(sr, interface);
+  fprintf(stderr, "Dirección de la interfaz: %02x:%02x:%02x:%02x:%02x:%02x\n",
+        iface->addr[0], iface->addr[1], iface->addr[2],
+        iface->addr[3], iface->addr[4], iface->addr[5]);
+
   sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
   struct sr_if * miInterfaz = sr_get_interface_given_ip(sr, ipHeader->ip_dst);
-  /*Si miInterfaz es igual 0 significa que entonces el paquete no es para mi router*/
+  /*Si miInterfaz es igual a 0 significa que entonces el paquete no es para mi router*/
   if(miInterfaz == 0){
     fprintf(stderr,"MiInterfaz == 0, OSEA EL PAQUETE NO ES PARA MI\n");
     print_addr_ip_int (ipHeader->ip_dst);
@@ -169,7 +197,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 			if(ipHeader->ip_ttl <= 1){
         fprintf(stderr,"el TTL es menor o igual a 1 \n");
         /* TTL es 1 o menor, enviar ICMP Time Exceeded*/
-        sr_send_icmp_error_packet(11, 0, sr, ipHeader->ip_dst, packet);
+        sr_send_icmp_error_packet(11, 0, sr, ipHeader->ip_src, packet);
       } else {
 
         fprintf(stderr,"el ttl es mayor a 1 \n");
@@ -183,11 +211,13 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         newIpHeader->ip_sum = 0;
         newIpHeader->ip_sum = ip_cksum(newIpHeader, sizeof(sr_ip_hdr_t));
         print_addr_ip_int (match->gw.s_addr);
+
+        /*Se busca la direccion MAC en la cache*/
         struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), match->gw.s_addr);
         if (entry) {
           
           fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
-          /* Usar la direccion MAC para enviar el paquete*/
+          /* Se usa la direccion MAC para enviar el paquete*/
           sr_ethernet_hdr_t *ethHdr = (sr_ethernet_hdr_t *) newPacket;
           print_addr_ip_int (sr_get_interface(sr, match->interface)->ip);
           memcpy(ethHdr->ether_shost, sr_get_interface(sr, match->interface)->addr, ETHER_ADDR_LEN);
@@ -390,3 +420,5 @@ void sr_handlepacket(struct sr_instance* sr,
   }
 
 }/* end sr_ForwardPacket */
+
+        
