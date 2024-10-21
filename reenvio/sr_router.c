@@ -162,7 +162,69 @@ void sr_send_icmp_echo_reply(struct sr_instance *sr,
                              unsigned int len,
                              char *interface)
 {
-  /* COLOQUE AQUÍ SU CÓDIGO*/
+  /* Se pide memoria para el nuevo paquete (ethernet,ip y icmp)*/
+  uint8_t *new_packet = (uint8_t *)malloc(len);
+  if (!new_packet) {
+    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
+    return;
+  }
+
+  /* Se copia la cabecera Ethernet e IP del paquete original */
+  memcpy(new_packet, packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+  /* Obtengo la interfaz de salida */
+  struct sr_if *iface = sr_get_interface(sr, interface);
+  if (!iface) {
+    fprintf(stderr, "Error: No se encontró la interfaz de salida\n");
+    free(new_packet);
+    return;
+  }
+
+  /* Se copia la dirección MAC de la interfaz de salida y 
+  la dirección MAC origen del paquete original al paquete */
+  sr_ethernet_hdr_t* ether_hdr_new_packet = (sr_ethernet_hdr_t*)new_packet;
+  sr_ethernet_hdr_t* ether_hdr_packet = (sr_ethernet_hdr_t*)packet;
+  memcpy(ether_hdr_new_packet->ether_shost, iface->addr, ETHER_ADDR_LEN);
+  memcpy(ether_hdr_new_packet->ether_dhost, ether_hdr_packet->ether_shost, ETHER_ADDR_LEN);
+
+  /*Consigo el header IP del paquete original */
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+
+  /* Consigo el header IP del nuevo paquete */
+  sr_ip_hdr_t *new_ip_hdr = (sr_ip_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t));
+
+  /* Modificar la cabecera IP */
+
+  /* Cambio la longitud del cabezal IP para agregar el ICMP*/
+  new_ip_hdr->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
+  /* Establezco el ttl en 64 (predefinido)*/
+  new_ip_hdr->ip_ttl = 64;
+  /* Cambio el protocolo a ICMP*/
+  new_ip_hdr->ip_p = ip_protocol_icmp;
+  /* Cambio la direccion IP de destino por la del paquete original*/
+  new_ip_hdr->ip_dst = ip_hdr->ip_src;
+  /* Cambio la direccion IP de origen por la de la interfaz de salida */
+  new_ip_hdr->ip_src = iface->ip;
+  
+  /* Calcular el checksum del paquete IP */
+  new_ip_hdr->ip_sum = 0;
+  new_ip_hdr->ip_sum = ip_cksum(new_ip_hdr, sizeof(sr_ip_hdr_t));
+
+  /* Crear la cabecera ICMP */
+  sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  sr_icmp_hdr_t *icmp_hdr_orig = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+  memcpy(icmp_hdr, icmp_hdr_orig, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+  icmp_hdr->icmp_type = 0;
+  icmp_hdr->icmp_code = 0;
+  icmp_hdr->icmp_sum = 0;
+  icmp_hdr->icmp_sum = icmp_cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+  /* Preguntar si hay que hacer otro struct, ya que falta el identifier y seqNumber*/
+
+  /* Enviar el paquete ICMP */
+  sr_send_packet(sr, new_packet, len, iface->name);
+
+  /* Liberar memoria */
+  free(new_packet);
 
 } /* -- sr_send_icmp_echo_reply -- */
 
