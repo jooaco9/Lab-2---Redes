@@ -55,20 +55,16 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint32_t ipDst,
                               uint8_t *ipPacket)
 {
-  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+  sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(ipPacket + sizeof(sr_ethernet_hdr_t));
   int ip_hdr_len = sizeof(sr_ip_hdr_t);
-
-  struct sr_icmp_t3_hdr *icmpHeader = (struct sr_icmp_t3_hdr *) (ipPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-  icmpHeader->icmp_type = type;
-  icmpHeader->icmp_code = code;
-  icmpHeader->icmp_sum = 0;
-  icmpHeader->unused = 0;
-  icmpHeader->next_mtu = 0;
-  memcpy(icmpHeader->data, ipPacket + sizeof(sr_ethernet_hdr_t), ICMP_DATA_SIZE);   
 
   /* Asignar memoria para el nuevo paquete */
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
   uint8_t *new_packet = (uint8_t *)malloc(len);
+  if (!new_packet) {
+    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
+    return;
+  }
 
   /* Copiar la cabecera Ethernet e IP del paquete original */
   memcpy(new_packet, ipPacket, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
@@ -82,6 +78,11 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Encontrar la mejor coincidencia de prefijo en la tabla de enrutamiento */
   struct sr_rt *lpm_entry = LPM(sr, ipDst);
+  if (!lpm_entry) {
+    fprintf(stderr, "Error: No se encontró una coincidencia en la tabla de enrutamiento\n");
+    free(new_packet);
+    return;
+  }
 
   /* Obtener la interfaz de salida */
   struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
