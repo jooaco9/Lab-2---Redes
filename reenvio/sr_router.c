@@ -278,6 +278,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
             Todo esto esta bien
           */
         }
+
+        free(newPacket);
 				
       }
     } else {
