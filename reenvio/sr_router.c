@@ -80,28 +80,15 @@ void sr_send_icmp_error_packet(uint8_t type,
   /* Se pide memoria para el nuevo paquete (ethernet,ip y icmp)*/
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
   uint8_t *new_packet = (uint8_t *)malloc(len);
-  if (!new_packet) {
-    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
-    return;
-  }
 
   /* Se copia la cabecera Ethernet e IP del paquete original */
   memcpy(new_packet, ipPacket, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
   /* Consigo la interfaz de salida que fue la misma por la que entro el paquete original*/
   struct sr_rt *lpm_entry = LPM(sr, ipDst);
-  if (!lpm_entry) {
-    fprintf(stderr, "Error: No se encontró una coincidencia en la tabla de enrutamiento\n");
-    free(new_packet);
-    return;
-  }
+
   /* Obtengo la interfaz de salida */
   struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
-  if (!iface) {
-    fprintf(stderr, "Error: No se encontró la interfaz de salida\n");
-    free(new_packet);
-    return;
-  }
 
   /* Se copia la dirección MAC de la interfaz de salida y 
   la dirección MAC origen del paquete original al paquete */
@@ -164,21 +151,12 @@ void sr_send_icmp_echo_reply(struct sr_instance *sr,
 {
   /* Se pide memoria para el nuevo paquete (ethernet,ip y icmp)*/
   uint8_t *new_packet = (uint8_t *)malloc(len);
-  if (!new_packet) {
-    fprintf(stderr, "Error: No se pudo asignar memoria para el nuevo paquete\n");
-    return;
-  }
 
   /* Se copia la cabecera Ethernet e IP del paquete original */
   memcpy(new_packet, packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
   /* Obtengo la interfaz de salida */
   struct sr_if *iface = sr_get_interface(sr, interface);
-  if (!iface) {
-    fprintf(stderr, "Error: No se encontró la interfaz de salida\n");
-    free(new_packet);
-    return;
-  }
 
   /* Se copia la dirección MAC de la interfaz de salida y 
   la dirección MAC origen del paquete original al paquete */
@@ -213,12 +191,13 @@ void sr_send_icmp_echo_reply(struct sr_instance *sr,
   /* Crear la cabecera ICMP */
   sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(new_packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
   sr_icmp_hdr_t *icmp_hdr_orig = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+  /* Copiamos del paquete orignal (todo) a partir de la cabecera ICMP*/
   memcpy(icmp_hdr, icmp_hdr_orig, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
   icmp_hdr->icmp_type = 0;
   icmp_hdr->icmp_code = 0;
   icmp_hdr->icmp_sum = 0;
   icmp_hdr->icmp_sum = icmp_cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
-  /* Preguntar si hay que hacer otro struct, ya que falta el identifier y seqNumber*/
 
   /* Enviar el paquete ICMP */
   sr_send_packet(sr, new_packet, len, iface->name);
@@ -318,6 +297,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         fprintf(stderr,"ES UN ECHO REQUEST\n");
         sr_send_icmp_echo_reply(sr, packet, len, interface);
       } 
+    } else {
+      sr_send_icmp_error_packet(3, 3, sr, ipHeader->ip_src, packet);
     }
   }
   /* 
