@@ -253,8 +253,14 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         newIpHeader->ip_sum = ip_cksum(newIpHeader, sizeof(sr_ip_hdr_t));
         print_addr_ip_int (match->gw.s_addr);
 
+        uint32_t gw = match->gw.s_addr;
+
+        if (match->gw.s_addr == 0){
+          fprintf(stderr,"El destino no tiene otra Interface\n");
+          gw = ipHeader->ip_dst;
+        }
         /*Se busca la direccion MAC en la cache*/
-        struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), match->gw.s_addr);
+        struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), gw);
         if (entry) {
           
           fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
@@ -272,7 +278,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         } else {
           fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
           /* Poner en cola la solicitud ARP*/
-          struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), match->gw.s_addr, newPacket, len, match->interface);
+          struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), gw, newPacket, len, match->interface);
           handle_arpreq(sr, arpRequest); 
           /*
             Todo esto esta bien
@@ -300,6 +306,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         sr_send_icmp_echo_reply(sr, packet, len, interface);
       } 
     } else {
+      fprintf(stderr,"No es paquete ICMP, entonces mando port unreachable\n");
       sr_send_icmp_error_packet(3, 3, sr, ipHeader->ip_src, packet);
     }
   }
