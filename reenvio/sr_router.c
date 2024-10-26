@@ -256,7 +256,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         uint32_t gw = match->gw.s_addr;
 
         if (match->gw.s_addr == 0){
-          fprintf(stderr,"El destino no tiene otra Interface\n");
+          fprintf(stderr,"El destino esta conectado directamente\n");
           gw = ipHeader->ip_dst;
         }
         /*Se busca la direccion MAC en la cache*/
