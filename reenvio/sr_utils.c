@@ -64,10 +64,9 @@ int is_packet_valid(uint8_t *packet /* lent */,
     printf("**** -> Validate ARP packet.\n");
     cumulative_sz += sizeof(sr_arp_hdr_t);
     if (len >= cumulative_sz) {
-       printf("***** -> Invalid packet length.\n");
+       printf("***** -> Packet length is correct.\n");
        return 1;
     }
-    printf("***** -> Packet length is correct.\n");
 
   } else if (eHdr->ether_type == htons(ethertype_ip)) {
     printf("**** -> Validate IP packet.\n");
@@ -94,13 +93,13 @@ int is_packet_valid(uint8_t *packet /* lent */,
         } else {
           /* TODO */
           printf("***** -> IP packet is of unknown protocol. No further validation is required.\n");
-	  return 1;
+	        return 1;
         }
       }
     }
   }
 
-  printf("*** -> Packet validation complete. Packet is valid.\n");
+  printf("*** -> Packet validation complete. Packet is INVALID.\n");
   return 0;
 }
 
