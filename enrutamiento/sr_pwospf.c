@@ -331,7 +331,7 @@ void* send_hello_packet(void* arg)
   header_ipPacket->ip_src = hello_param->interface->ip;
   /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
   header_ipPacket->ip_dst = OSPF_AllSPFRouters;
-  header_ipPacket->ttl = 64;
+  header_ipPacket->ttl = 1;
   header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_hello_hdr_t));
 
   /* Calculo y seteo el chechsum IP*/
@@ -347,6 +347,7 @@ void* send_hello_packet(void* arg)
   header_ospfPacket->rid = g_router_id;
   /* Seteo el Area ID en 0 */
   header_ospfPacket->aid = 0; 
+  header_ospfPacket->len = htonst(sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
   /* Seteo el Authentication Type y Authentication Data en 0*/
   header_ospfPacket->autype = 0;
   header_ospfPacket->audata = 0;
@@ -390,13 +391,23 @@ void* send_all_lsu(void* arg)
     while(1)
     {
         /* Se ejecuta cada OSPF_DEFAULT_LSUINT segundos */
-        usleep(OSPF_DEFAULT_LSUINT * 1000000);
+        usleep(OSPF_DEFAULT_LSUINT * 1000000 );
 
         /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
         pwospf_lock(sr->ospf_subsys);
         
         /* Recorro todas las interfaces para enviar el paquete LSU */
-            /* Si la interfaz tiene un vecino, envío un LSU */
+        /* Si la interfaz tiene un vecino, envío un LSU */
+        struct sr_if* if_list = sr->if_list;
+        while(if_list){
+            if(if_list->neighbor_id != NULL){
+                powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
+                lsu_param->sr = sr;
+                lsu_param->interface = if_list;
+                pthread_create(&g_lsu_thread, NULL, send_lsu, hello_param);
+            }
+            if_list = if_list->next;
+        };        
 
         /* Desbloqueo */
         pwospf_unlock(sr->ospf_subsys);
@@ -417,35 +428,96 @@ void* send_lsu(void* arg)
     powspf_hello_lsu_param_t* lsu_param = ((powspf_hello_lsu_param_t*)(arg));
 
     /* Solo envío LSUs si del otro lado hay un router*/
+    if(lsu_param->interface->neighbor_ip != 0){
     
-    /* Construyo el LSU */
-    Debug("\n\nPWOSPF: Constructing LSU packet\n");
+        /* Construyo el LSU */
+        Debug("\n\nPWOSPF: Constructing LSU packet\n");
+         /* Creo el paquete a transmitir */
+        int cantLsa = count_routes(lsu_param->sr);
+        unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t);
+        uint8_t * lsuPkt = (uint8_t *)malloc(len);
+        memset(lsuPkt, 0, len);
+    
+        /* Inicializo cabezal Ethernet */
+        sr_ethernet_hdr_t* header_etherPacket = (sr_ethernet_hdr_t*)lsuPkt;
+         /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
+        memcpy(header_etherPacket->ether_shost, lsu_param->interface->addr, ETHER_ADDR_LEN);
+        /* Seteo el ether_type en el cabezal Ethernet */
+        header_etherPacket->ether_type = 4;
+        
+        /* Inicializo cabezal IP*/
+        sr_ip_hdr_t* header_ipPacket = (sr_ip_hdr_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t));
+        /* La IP destino es la del vecino contectado a mi interfaz*/
+        header_ipPacket->ip_dst = lsu_param->interface->neighbor_ip;
+        header_ipPacket->ip_p = 89; 
+        /* Seteo IP origen con la IP de mi interfaz de salida */
+        header_ipPacket->ip_src = hello_param->interface->ip;
+        header_ipPacket->ttl = 64;
+        header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
+        /* Calculo y seteo el chechsum IP*/
+        header_ipPacket->ip_sum = 0;
+        header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
 
-    /* Inicializo cabezal Ethernet */
-    /* Dirección MAC destino la dejo para el final ya que hay que hacer ARP */
+        /* Inicializo cabezal de OSPF*/
+        ospfv2_hdr_t* header_ospfPacket = (ospfv2_hdr_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+        header_ospfPacket->type = OSPF_TYPE_LSU;
+        header_ospfPacket->version = OSPF_V2;
+        header_ospfPacket->len =  htons(sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
+        header_ospfPacket->rid = g_router_id; ;
+        header_ospfPacket->aid = 0;
+        header_ospfPacket->autype = 0;
+        header_ospfPacket->audata = 0;
+        ospfv2_lsu_hdr_t * header_lsuPacket = (ospfv2_lsu_hdr_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t)); 
+        /* Seteo el número de secuencia y avanzo*/
+        header_lsuPacket->seq = g_sequence_num;
+        g_sequence_num++;
 
-    /* Inicializo cabezal IP*/
-    /* La IP destino es la del vecino contectado a mi interfaz*/
-   
-    /* Inicializo cabezal de OSPF*/
+        /* Seteo el TTL en 64 y el resto de los campos del cabezal de LSU */
+        header_lsuPacket->ttl = 64;
+        header_lsuPacket->unused = 0;
+        /* Seteo el número de anuncios con la cantidad de rutas a enviar. Uso función count_routes */
+        header_lsuPacket->num_adv = can;
+        int cont = 0;
+        struct sr_rt * ruta = lsu_param->sr->routing_table;
+        /* Creo cada LSA iterando en las entradas de la tabla */
+            /* Solo envío entradas directamente conectadas y agreagadas a mano*/
+            /* Creo LSA con subnet, mask y routerID (id del vecino de la interfaz)*/
+        while(ruta != NULL){
+            if(ruta->admin_dst <= 1){
+                ospfv2_lsa_t * header_lsaPacket = (ospfv2_lsa_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + i * sizeof(ospfv2_lsa_t)); 
+                cont++;
+                header_lsaPacket->subnet = ruta->dest;
+                header_lsaPacket->mask = ruta->mask;
+                header_lsaPacket->rid = lsu_param->interface->neighbor_id;
+            }
+            ruta = ruta->next;    
+        }   
+        /* Calculo el checksum del paquete LSU */
+        header_ospfPacket->csum = 0;
+        header_ospfPacket->csum = ospfv2_cksum(header_ospfPacket, sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
 
-    /* Seteo el número de secuencia y avanzo*/
-    /* Seteo el TTL en 64 y el resto de los campos del cabezal de LSU */
-    /* Seteo el número de anuncios con la cantidad de rutas a enviar. Uso función count_routes */
 
-    /* Creo el paquete y seteo todos los cabezales del paquete a transmitir */
-
-    /* Creo cada LSA iterando en las enttadas de la tabla */
-        /* Solo envío entradas directamente conectadas y agreagadas a mano*/
-        /* Creo LSA con subnet, mask y routerID (id del vecino de la interfaz)*/
-
-    /* Calculo el checksum del paquete LSU */
-
-    /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
-    /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
-   
-   /* Libero memoria */
-
+        /* Dirección MAC destino la dejo para el final ya que hay que hacer ARP */
+        /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
+        /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
+        struct sr_arpentry *entry = sr_arpcache_lookup(&(lsu_param->sr->cache), lsu_param->interface->neighbor_ip);
+        if (entry) {
+            fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
+            /* Se usa la direccion MAC para enviar el paquete*/
+            memcpy(header_etherPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+            /* Enviar el paquete*/
+            sr_send_packet(lsu_param->sr, lsuPkt, len, lsu_param->interface->name);
+            /* Liberar la entrada ARP*/
+            free(entry);
+        } else {
+            fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
+            /* Poner en cola la solicitud ARP*/
+            struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(lsu_param->sr->cache), lsu_param->interface->neighbor_ip, lsuPkt, len, lsu_param->interface->name);
+            handle_arpreq(lsu_param->sr, arpRequest); 
+        }
+        /* Libero memoria */
+        free(lsuPkt);
+    }
     return NULL;
 } /* -- send_lsu -- */
 
@@ -459,6 +531,7 @@ void* send_lsu(void* arg)
 
 void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsigned int length, struct sr_if* rx_if)
 {
+    
     /* Obtengo información del paquete recibido */
     /* Imprimo info del paquete recibido*/
     /*
