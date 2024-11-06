@@ -16,11 +16,11 @@ void* run_dijkstra(void* arg)
 {
     dijkstra_param_t* dij_param = ((dijkstra_param_t*)(arg));
 
-    pthread_mutex_t dijkstra_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_t mutex = dij_param->mutex;
     struct pwospf_topology_entry* topology = dij_param->topology;
     struct in_addr router_id = dij_param->rid;
 
-    pthread_mutex_lock(&dijkstra_mutex);
+    pthread_mutex_lock(&mutex);
 
     struct in_addr zero;
     zero.s_addr = 0;
@@ -137,7 +137,7 @@ void* run_dijkstra(void* arg)
     Debug("\n-> PWOSPF: Printing the forwarding table\n");
     sr_print_routing_table(dij_param->sr);
 
-    pthread_mutex_unlock(&dijkstra_mutex);
+    pthread_mutex_unlock(&mutex);
 
     return NULL;
 } /* -- run_dijkstra -- */

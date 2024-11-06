@@ -21,6 +21,7 @@ struct dijkstra_param
     struct sr_instance* sr;
     struct pwospf_topology_entry* topology;
     struct in_addr rid;
+    pthread_mutex_t mutex;
 }__attribute__ ((packed));
 typedef struct dijkstra_param dijkstra_param_t;
 
