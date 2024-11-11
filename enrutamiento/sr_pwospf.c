@@ -506,15 +506,18 @@ void* send_lsu(void* arg)
                 ospfv2_lsa_t * header_lsaPacket = (ospfv2_lsa_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cont * sizeof(ospfv2_lsa_t)); 
                 cont++;
                 struct sr_if* interface2 = sr->if_list;
+                uint32_t rId = interface->neighbor_id;
                 while(interface2 != NULL){
-                    if(interface2->ip == ruta->dest.s_addr){
+                    if (interface2->neighbor_ip == ruta->dest.s_addr) {
+                        rId = interface2->neighbor_id;
+                        printf("------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------Es un vecino ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------");
                         break;
                     }
                     interface2 = interface2->next;
                 }
                 header_lsaPacket->subnet = ruta->dest.s_addr & ruta->mask.s_addr;
                 header_lsaPacket->mask = ruta->mask.s_addr;
-                header_lsaPacket->rid = interface2->ip;
+                header_lsaPacket->rid = rId;
             }
             ruta = ruta->next;    
         }   
@@ -704,6 +707,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
       mask.s_addr = lsa->mask;
       dest.s_addr = lsa->subnet;
       gw.s_addr = lsa->rid;
+
       /* LLamo a refresh_topology_entry*/
       refresh_topology_entry(g_topology, g_router_id, dest, mask,
                               neighbor_id_addr, gw, lsuHeader->seq);
