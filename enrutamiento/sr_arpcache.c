@@ -50,7 +50,7 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
       copyPacket = malloc(arpPacketLen);
       memcpy(copyPacket, ethHdr, arpPacketLen);
 
-      print_hdrs(copyPacket, arpPacketLen);
+      /*print_hdrs(copyPacket, arpPacketLen);*/
       sr_send_packet(sr, copyPacket, arpPacketLen, currIf->name);
 
       currIf = currIf->next;

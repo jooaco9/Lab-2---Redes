@@ -71,7 +71,7 @@ int is_packet_valid(uint8_t *packet /* lent */,
   sr_ethernet_hdr_t *eHdr = (sr_ethernet_hdr_t *) packet;
     
   printf("*** -> Perform validation on the packet.\n");
-
+  fprintf(stderr, "\ttype: %d\n", ntohs(eHdr->ether_type));
   if (eHdr->ether_type == htons(ethertype_arp)) {
     printf("**** -> Validate ARP packet.\n");
     cumulative_sz += sizeof(sr_arp_hdr_t);
