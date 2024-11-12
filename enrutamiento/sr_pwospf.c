@@ -229,9 +229,7 @@ void* check_topology_entries_age(void* arg)
       en un nuevo hilo.
       Se sugiere también imprimir la topología resultado del chequeo.
       */
-        usleep(1000000);
         if(check_topology_age(g_topology) == 1){
-            Debug("\n\n CAMBIO DE TOPOLOGIA////////////////////////////////////////////////////////// \n");
             dijkstra_param_t* dij_param = (dijkstra_param_t*)malloc(sizeof(dijkstra_param_t));
 
             dij_param->topology = g_topology;
@@ -243,6 +241,7 @@ void* check_topology_entries_age(void* arg)
             print_topolgy_table(g_topology);
             /*free(dij_param);*/
         }
+        usleep(1000000);
     }
 
     return NULL;
@@ -334,6 +333,9 @@ void* send_hello_packet(void* arg)
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     header_ipPacket->ip_dst = OSPF_AllSPFRouters;
     header_ipPacket->ip_ttl = 1;
+    header_ipPacket->ip_v = 4;
+    header_ipPacket->ip_hl = 5;
+    header_ipPacket->ip_off = htons(IP_DF);
     header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_hello_hdr_t));
 
     /* Calculo y seteo el chechsum IP*/
@@ -347,7 +349,7 @@ void* send_hello_packet(void* arg)
     header_ospfPacket->version = OSPF_V2;
 
     /* Seteo el Router ID con mi ID*/
-    header_ospfPacket->rid = htonl(g_router_id.s_addr); 
+    header_ospfPacket->rid = (g_router_id.s_addr); 
     /*Debug("      [Router ID = %s]\n", inet_ntoa(g_router_id));*/
     /* Seteo el Area ID en 0 */
     header_ospfPacket->aid = 0; 
@@ -470,10 +472,11 @@ void* send_lsu(void* arg)
         header_ipPacket->ip_src = interface->ip;
         header_ipPacket->ip_ttl = 64;
         header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
+        header_ipPacket->ip_off = htons(IP_DF);
         /* Calculo y seteo el chechsum IP*/
         header_ipPacket->ip_sum = 0;
         header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
-
+        
         /* Inicializo cabezal de OSPF*/
         ospfv2_hdr_t* header_ospfPacket = (ospfv2_hdr_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
         header_ospfPacket->type = OSPF_TYPE_LSU;
@@ -505,19 +508,9 @@ void* send_lsu(void* arg)
             if(ruta->admin_dst <= 1){
                 ospfv2_lsa_t * header_lsaPacket = (ospfv2_lsa_t*)(lsuPkt + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cont * sizeof(ospfv2_lsa_t)); 
                 cont++;
-                struct sr_if* interface2 = sr->if_list;
-                uint32_t rId = interface->neighbor_id;
-                while(interface2 != NULL){
-                    if (interface2->neighbor_ip == ruta->dest.s_addr) {
-                        rId = interface2->neighbor_id;
-                        printf("------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------Es un vecino ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------");
-                        break;
-                    }
-                    interface2 = interface2->next;
-                }
-                header_lsaPacket->subnet = ruta->dest.s_addr & ruta->mask.s_addr;
+                header_lsaPacket->subnet = ruta->dest.s_addr;
                 header_lsaPacket->mask = ruta->mask.s_addr;
-                header_lsaPacket->rid = rId;
+                header_lsaPacket->rid = sr_get_interface(sr, ruta->interface)->neighbor_id;
             }
             ruta = ruta->next;    
         }   
@@ -618,28 +611,28 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     if(ptr == NULL){
         Debug("VECINO NUEVO\n");
         /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
+        powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
+        lsu_param->sr = sr;
+        lsu_param->interface = rx_if;
         pwospf_lock(sr->ospf_subsys);
+        pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
+        pwospf_unlock(sr->ospf_subsys);
         
         /* Recorro todas las interfaces para enviar el paquete LSU */
         /* Si la interfaz tiene un vecino, envío un LSU */
-        struct sr_if* if_list = sr->if_list;
+        /*struct sr_if* if_list = sr->if_list;
         int cont = 0;
         while(if_list){
             cont++;
             if(if_list->neighbor_id != 0){
                 Debug("\n\nMANDA UN LSU POR LA NUMERO %d\n", cont);
-                powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
-                lsu_param->sr = sr;
-                lsu_param->interface = if_list;
-                pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
             }
             else{
                 Debug("\n\nNO MANDA UN LSU , NO TIENE VECINO POR LA NUMERO %d\n", cont);
             }
             if_list = if_list->next;
-        };        
+        };  */      
         /* Desbloqueo */
-        pwospf_unlock(sr->ospf_subsys);
     }
 } /* -- sr_handle_pwospf_hello_packet -- */
 
@@ -684,11 +677,11 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
       Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");
       return NULL;
     }
-
+    int a = 1;
     /* Obtengo el número de secuencia y uso check_sequence_number para ver si ya lo recibí desde ese vecino */
     if (!check_sequence_number(g_topology,neighbor_id_addr, lsuHeader->seq)) {
       Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
-      return NULL;
+      a = 0;
     }
 
     int num_adv = lsuHeader->num_adv;
@@ -699,22 +692,22 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         /* Imprimo info de la entrada de la topología */
     Debug("-> PWOSPF: Processing LSAs and updating topology table\n"); 
     ospfv2_lsa_t * lsa; 
-    struct in_addr mask, dest, gw;
+    struct in_addr mask, subnet, rid,src;
     int i;
+    src.s_addr = ipHeader->ip_src;
     for (i = 0; i < num_adv; i++) {
   
-      lsa = (ospfv2_lsa_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + i * sizeof(ospfv2_lsa_t)); 
-      mask.s_addr = lsa->mask;
-      dest.s_addr = lsa->subnet;
-      gw.s_addr = lsa->rid;
-
-      /* LLamo a refresh_topology_entry*/
-      refresh_topology_entry(g_topology, g_router_id, dest, mask,
-                              neighbor_id_addr, gw, lsuHeader->seq);
-     /* Debug("      [Subnet = %s]", inet_ntoa(dest));
-      Debug("      [Mask = %s]", inet_ntoa(mask));
-      Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id_addr));
-      Debug("      [GW = %s]\n", inet_ntoa(gw));*/
+        lsa = (ospfv2_lsa_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + i * sizeof(ospfv2_lsa_t)); 
+        mask.s_addr = lsa->mask;
+        subnet.s_addr = lsa->subnet;
+        rid.s_addr = lsa->rid;
+        /* LLamo a refresh_topology_entry*/
+        refresh_topology_entry(g_topology, g_router_id, subnet, mask,
+                                rid,src , lsuHeader->seq);
+        /* Debug("      [Subnet = %s]", inet_ntoa(subnet));
+        Debug("      [Mask = %s]", inet_ntoa(mask));
+        Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id_addr));
+        Debug("      [GW = %s]\n", inet_ntoa(gw));*/
 
     }
     /* Imprimo la topología */
@@ -733,8 +726,8 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             /* Ajusto cabezal OSPF: checksum y TTL*/
             /* Envío el paquete*/
     struct sr_if* if_list = sr->if_list;
-    while(if_list && lsuHeader->ttl > 1 && ipHeader->ip_ttl > 1){
-        if(if_list->neighbor_id != 0){
+    while(if_list != NULL){ 
+        if(if_list->neighbor_id != 0 && if_list->ip != rx_if->ip){
                 uint8_t *newPacket = malloc(length);
                 memcpy(newPacket, packet,length);
                 /* Ajusto cabezal Ethernet */
@@ -747,7 +740,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
                 header_ipPacket->ip_dst = neighbor_ip;
                 header_ipPacket->ip_ttl--;
                 /* Seteo IP origen con la IP de mi interfaz de salida */
-                header_ipPacket->ip_src = rx_if->ip;
+                header_ipPacket->ip_src = if_list->ip;
                 header_ipPacket->ip_sum = 0;
                 header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
                 /* Ajusto cabezal OSPF: checksum y TTL*/
