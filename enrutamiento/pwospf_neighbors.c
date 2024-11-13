@@ -30,9 +30,10 @@ void delete_neighbor(struct ospfv2_neighbor* previous_neighbor)
     free(temp);
 }
 
-void check_neighbors_alive(struct ospfv2_neighbor* first_neighbor)
+struct ospfv2_neighbor* check_neighbors_alive(struct ospfv2_neighbor* first_neighbor)
 {
     struct ospfv2_neighbor* ptr = first_neighbor;
+    struct ospfv2_neighbor* result = NULL;
 
     while(ptr != NULL)
     {
@@ -44,7 +45,9 @@ void check_neighbors_alive(struct ospfv2_neighbor* first_neighbor)
         if (ptr->next->alive == 0)
         {
             Debug("\n\n**** PWOSPF: Removing the neighbor, [ID = %s] from the alive neighbors table\n\n", inet_ntoa(ptr->next->neighbor_id));
-
+            struct ospfv2_neighbor* temp = result;
+            result = create_ospfv2_neighbor(ptr->next->neighbor_id);
+            result->next = temp;
             delete_neighbor(ptr);
         }
         else
@@ -54,6 +57,7 @@ void check_neighbors_alive(struct ospfv2_neighbor* first_neighbor)
 
         ptr = ptr->next;
     }
+    return result;
 }
 
 void refresh_neighbors_alive(struct ospfv2_neighbor* first_neighbor, struct in_addr neighbor_id)
@@ -85,3 +89,4 @@ struct ospfv2_neighbor* create_ospfv2_neighbor(struct in_addr neighbor_id)
 
     return new_neighbor;
 }
+

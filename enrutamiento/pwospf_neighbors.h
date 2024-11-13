@@ -28,7 +28,7 @@ struct ospfv2_neighbor
 
 void add_neighbor(struct ospfv2_neighbor*, struct ospfv2_neighbor*);
 void delete_neighbor(struct ospfv2_neighbor*);
-void check_neighbors_alive(struct ospfv2_neighbor*);
+struct ospfv2_neighbor* check_neighbors_alive(struct ospfv2_neighbor*);
 void refresh_neighbors_alive(struct ospfv2_neighbor*, struct in_addr);
 struct ospfv2_neighbor* create_ospfv2_neighbor(struct in_addr);
 
