@@ -207,8 +207,6 @@ void* check_neighbors_life(void* arg) {
     Cada 1 segundo, chequea la lista de vecinos.
     Si hay un cambio, se debe ajustar el neighbor id en la interfaz.
     */
-    return NULL;
-
     while(1) {
         usleep(1000000);
         struct ospfv2_neighbor* vecinosRemovidos = check_neighbors_alive(g_neighbors);
