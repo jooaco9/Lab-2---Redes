@@ -235,13 +235,13 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     Poner en el informe que no verificamos el checksum porque 
     la funcion que llama a esta lo valida con is_valid_packet, 
     el cual verifica en cada cabezal que el checksum esta bien
-  print_hdrs (packet, (uint32_t) len);
+    print_hdrs (packet, (uint32_t) len);
   */ 
  
   sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
   struct sr_if * miInterfaz = sr_get_interface_given_ip(sr, ipHeader->ip_dst);
   /*Si miInterfaz es igual a 0 significa que entonces el paquete no es para mi router*/
-  if(miInterfaz == 0 && ipHeader->ip_dst != OSPF_AllSPFRouters){
+  if(miInterfaz == 0 && ipHeader->ip_dst != htonl(OSPF_AllSPFRouters)){
     fprintf(stderr,"MiInterfaz == 0, OSEA EL PAQUETE NO ES PARA MI\n");
     print_addr_ip_int (ipHeader->ip_dst);
 		struct sr_rt * match = LPM(sr, ipHeader->ip_dst);
