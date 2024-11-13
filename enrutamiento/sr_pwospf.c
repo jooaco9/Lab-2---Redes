@@ -626,29 +626,29 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     rx_if->mask = net_mask.s_addr;
 
     if(ptr == NULL){
-        Debug("VECINO NUEVO\n");
-        powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
-        lsu_param->sr = sr;
-        lsu_param->interface = rx_if;
-        /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
-        pwospf_lock(sr->ospf_subsys);
-        pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
-        pwospf_unlock(sr->ospf_subsys);
         
         /* Recorro todas las interfaces para enviar el paquete LSU */
         /* Si la interfaz tiene un vecino, envío un LSU */
-        /*struct sr_if* if_list = sr->if_list;
+        struct sr_if* if_list = sr->if_list;
         int cont = 0;
         while(if_list){
             cont++;
             if(if_list->neighbor_id != 0){
+                Debug("VECINO NUEVO\n");
+                powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
+                lsu_param->sr = sr;
+                lsu_param->interface = rx_if;
+                /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
+                pwospf_lock(sr->ospf_subsys);
+                pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
+                pwospf_unlock(sr->ospf_subsys);
                 Debug("\n\nMANDA UN LSU POR LA NUMERO %d\n", cont);
             }
             else{
                 Debug("\n\nNO MANDA UN LSU , NO TIENE VECINO POR LA NUMERO %d\n", cont);
             }
             if_list = if_list->next;
-        };  */      
+        };      
         /* Desbloqueo */
     }
 } /* -- sr_handle_pwospf_hello_packet -- */
