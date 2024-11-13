@@ -207,13 +207,28 @@ void* check_neighbors_life(void* arg) {
     Cada 1 segundo, chequea la lista de vecinos.
     Si hay un cambio, se debe ajustar el neighbor id en la interfaz.
     */
-    return NULL;
-
     while(1) {
         usleep(1000000);
-        check_neighbors_alive(g_neighbors);
-        /* Cada 1 segundo, chequea la lista de vecinos. */
+        struct ospfv2_neighbor* neighbors_death = check_neighbors_alive(g_neighbors);
+        
+        if (neighbors_death != NULL) {
+            struct sr_if* first_interface = sr->if_list;
+            while (first_interface)
+            {
+                struct ospfv2_neighbor* dead_neighbor = neighbors_death;
+                while(dead_neighbor) {
+                    if (first_interface->neighbor_id.s_addr == dead_neighbor->neighbor_id.s_addr) {
+                        first_interface->neighbor_id.s_addr = 0;
+                    }
+                    dead_neighbor = dead_neighbor->next;
+                }
+                first_interface = first_interface->next;
+            }
+            
+        }
     }
+
+    return NULL;
 } /* -- check_neighbors_life -- */
 
 
