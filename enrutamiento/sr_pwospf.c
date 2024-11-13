@@ -253,10 +253,10 @@ void* check_topology_entries_age(void* arg)
             dij_param->rid = g_router_id;
             dij_param->sr = sr;
             pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, dij_param);
-            /*pthread_join(g_dijkstra_thread, NULL);*/
+            pthread_join(g_dijkstra_thread, NULL);
             Debug("\n\n TOPOLOGIA ACTUAL: \n");
             print_topolgy_table(g_topology);
-            /*free(dij_param);*/
+            free(dij_param);
         }
         usleep(1000000);
     }
@@ -399,8 +399,8 @@ void* send_hello_packet(void* arg)
     Debug("      [Router IP = %s]\n", inet_ntoa(interface_id));
     Debug("      [Network Mask = %s]\n", inet_ntoa(interface_mask));*/
     sr_send_packet(sr,helloPkt,len,interface->name);
-    free(hello_param);
     free(helloPkt);
+    free(hello_param);   
     return NULL;
 } /* -- send_hello_packet -- */
 
@@ -462,7 +462,6 @@ void* send_lsu(void* arg)
     powspf_hello_lsu_param_t* lsu_param = ((powspf_hello_lsu_param_t*)(arg));
     struct sr_instance* sr = lsu_param->sr;
     struct sr_if* interface = lsu_param->interface;
-    
     /* Solo envío LSUs si del otro lado hay un router*/
     if(interface->neighbor_ip != 0){ 
         /* Construyo el LSU */
@@ -490,6 +489,7 @@ void* send_lsu(void* arg)
         header_ipPacket->ip_ttl = 64;
         header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
         header_ipPacket->ip_off = htons(IP_DF);
+        header_ipPacket->ip_v = 4;
         /* Calculo y seteo el chechsum IP*/
         header_ipPacket->ip_sum = 0;
         header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
@@ -510,7 +510,6 @@ void* send_lsu(void* arg)
         g_sequence_num = g_sequence_num + 1;
 
         /* Seteo el TTL en 64 y el resto de los campos del cabezal de LSU */
-        
         header_lsuPacket->ttl = 64;
         header_lsuPacket->unused = 0;
         /* Seteo el número de anuncios con la cantidad de rutas a enviar. Uso función count_routes */
@@ -545,23 +544,26 @@ void* send_lsu(void* arg)
         struct sr_arpentry *entry = sr_arpcache_lookup(&(lsu_param->sr->cache), interface->neighbor_ip);
         Debug("Ether_type: %d\n", ntohs(header_etherPacket->ether_type));
         if (entry) {
-            fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
+            fprintf(stderr,"Se encontro la direcion MAC en el cache 1\n");
             /* Se usa la direccion MAC para enviar el paquete*/
             memcpy(header_etherPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+            fprintf(stderr,"Se encontro la direcion MAC en el cache 2\n");
             /* Liberar la entrada ARP*/
             /* Enviar el paquete*/
             sr_send_packet(sr, lsuPkt, len, interface->name);
+            fprintf(stderr,"Se encontro la direcion MAC en el cache 3 \n");
+            free(lsuPkt);
             free(entry);
         } else {
             fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
             /* Poner en cola la solicitud ARP*/
             struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), interface->neighbor_ip, lsuPkt, len, interface->name);
+            free(lsuPkt);
             handle_arpreq(sr, arpRequest); 
         }
         /* Libero memoria */
-        free(lsu_param);
-        free(lsuPkt);
     }
+    free(lsu_param);
     return NULL;
 } /* -- send_lsu -- */
 
@@ -629,16 +631,24 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
         
         /* Recorro todas las interfaces para enviar el paquete LSU */
         /* Si la interfaz tiene un vecino, envío un LSU */
+        Debug("VECINO NUEVO\n");
+        powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
+        lsu_param->sr = sr;
+        lsu_param->interface = rx_if;
+        /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
+        pwospf_lock(sr->ospf_subsys);
+        pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
+        pwospf_unlock(sr->ospf_subsys);
         struct sr_if* if_list = sr->if_list;
-        int cont = 0;
+        /*int cont = 0;
         while(if_list){
             cont++;
             if(if_list->neighbor_id != 0){
                 Debug("VECINO NUEVO\n");
                 powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
                 lsu_param->sr = sr;
-                lsu_param->interface = rx_if;
-                /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
+                lsu_param->interface = if_list;
+                 Bloqueo para evitar mezclar el envío de HELLOs y LSUs 
                 pwospf_lock(sr->ospf_subsys);
                 pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
                 pwospf_unlock(sr->ospf_subsys);
@@ -648,7 +658,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
                 Debug("\n\nNO MANDA UN LSU , NO TIENE VECINO POR LA NUMERO %d\n", cont);
             }
             if_list = if_list->next;
-        };      
+        };      */
         /* Desbloqueo */
     }
 } /* -- sr_handle_pwospf_hello_packet -- */
@@ -669,6 +679,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     uint8_t* packet = rx_lsu_param->packet;
     unsigned int length = rx_lsu_param->length;
     struct sr_if* rx_if = rx_lsu_param->rx_if;
+    free(rx_lsu_param);
     /* Obtengo el vecino que me envió el LSU*/
 
     /* Imprimo info del paquete recibido*/
@@ -710,6 +721,14 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     struct in_addr mask, subnet, rid,src;
     int i;
     src.s_addr = ipHeader->ip_src;
+
+    struct pwospf_topology_entry* ptr = g_topology;
+    int topologiaAnterior = 0;
+    while(ptr != NULL){
+        topologiaAnterior ++;
+        ptr = ptr->next;
+    }
+
     for (i = 0; i < num_adv; i++) {
   
         lsa = (ospfv2_lsa_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + i * sizeof(ospfv2_lsa_t)); 
@@ -725,70 +744,85 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         Debug("      [GW = %s]\n", inet_ntoa(gw));*/
 
     }
-    /* Imprimo la topología */
-    Debug("\n-> PWOSPF: Printing the topology table\n");
-    print_topolgy_table(g_topology);
+    int topologiaActual = 0;
+    while(ptr != NULL){
+        topologiaActual ++;
+        ptr = ptr->next;
+    }
 
-    /* Ejecuto Dijkstra en un nuevo hilo (run_dijkstra)*/
-    dijkstra_param_t* dij_param = (dijkstra_param_t*)malloc(sizeof(dijkstra_param_t));
-    dij_param->topology = g_topology;
-    dij_param->rid = g_router_id;
-    dij_param->sr = sr;
-    pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, dij_param);
+    if(topologiaActual != topologiaAnterior){
+        /* Imprimo la topología */
+        Debug("\n-> PWOSPF: Printing the topology table\n");
+        print_topolgy_table(g_topology);
+        /* Ejecuto Dijkstra en un nuevo hilo (run_dijkstra)*/
+        dijkstra_param_t* dij_param = (dijkstra_param_t*)malloc(sizeof(dijkstra_param_t));
+        dij_param->topology = g_topology;
+        dij_param->rid = g_router_id;
+        dij_param->sr = sr;
+        pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, dij_param);
+        pthread_join(g_dijkstra_thread, NULL);
+        free(dij_param);
+    }
     /* Flooding del LSU por todas las interfaces menos por donde me llegó */
             /* Seteo MAC de origen */
             /* Ajusto paquete IP, origen y checksum*/
             /* Ajusto cabezal OSPF: checksum y TTL*/
             /* Envío el paquete*/
     struct sr_if* if_list = sr->if_list;
-    while(if_list != NULL){ 
+    while(if_list != NULL && lsuHeader->ttl > 1){ 
+        fprintf(stderr,"Se encontro la direcion MAC en el cache 11\n");
         if(if_list->neighbor_id != 0 && if_list->ip != rx_if->ip){
-                uint8_t *newPacket = malloc(length);
-                memcpy(newPacket, packet,length);
-                /* Ajusto cabezal Ethernet */
-                sr_ethernet_hdr_t* header_etherNewPacket = (sr_ethernet_hdr_t*)newPacket;
-                /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
-                memcpy(header_etherNewPacket->ether_shost, rx_if->addr, ETHER_ADDR_LEN);
-                /* Seteo cabezal IP*/
-                sr_ip_hdr_t* header_ipPacket = (sr_ip_hdr_t*)(newPacket + sizeof(sr_ethernet_hdr_t));
-                /* La IP destino es la del vecino conectado a mi interfaz*/
-                header_ipPacket->ip_dst = if_list->neighbor_ip;
-                header_ipPacket->ip_ttl--;
-                /* Seteo IP origen con la IP de mi interfaz de salida */
-                header_ipPacket->ip_src = if_list->ip;
-                header_ipPacket->ip_sum = 0;
-                header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
-                /* Ajusto cabezal OSPF: checksum y TTL*/
-                ospfv2_hdr_t * header_ospfHeader = (ospfv2_hdr_t *) (newPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-                ospfv2_lsu_hdr_t * header_lsuHeader = (ospfv2_lsu_hdr_t *) (newPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t));
-                header_lsuHeader->ttl--;
-                header_ospfHeader->csum = 0;
-                header_ospfHeader->csum = ospfv2_cksum(header_ospfHeader, sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + num_adv * sizeof(ospfv2_lsa_t));
-                /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
-                /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
-                struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), if_list->neighbor_ip);
-                Debug("\n\n PAQUETE LSU :\n");
-                if (entry) {
-                    fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
-                    /* Se usa la direccion MAC para enviar el paquete*/
-                    memcpy(header_etherNewPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-                    /* Enviar el paquete*/
-                    sr_send_packet(sr, newPacket, length, if_list->name);
-                    /* Liberar la entrada ARP*/
-                    free(entry);
-                } else {
-                    fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
-                    /* Poner en cola la solicitud ARP*/
-                    struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), if_list->neighbor_ip, newPacket, length, if_list->name);
-                    handle_arpreq(sr, arpRequest); 
-                }
+            uint8_t *newPacket = malloc(length);
+            fprintf(stderr,"Se encontro la direcion MAC en el cache 12\n");
+            memcpy(newPacket, packet,length);
+            /* Ajusto cabezal Ethernet */
+            sr_ethernet_hdr_t* header_etherNewPacket = (sr_ethernet_hdr_t*)newPacket;
+            /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
+            memcpy(header_etherNewPacket->ether_shost, if_list->addr, ETHER_ADDR_LEN);
+            /* Seteo cabezal IP*/
+            sr_ip_hdr_t* header_ipPacket = (sr_ip_hdr_t*)(newPacket + sizeof(sr_ethernet_hdr_t));
+            /* La IP destino es la del vecino conectado a mi interfaz*/
+            header_ipPacket->ip_dst = if_list->neighbor_ip;
+            /* Seteo IP origen con la IP de mi interfaz de salida */
+            header_ipPacket->ip_src = if_list->ip;
+            header_ipPacket->ip_sum = 0;
+            header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
+            /* Ajusto cabezal OSPF: checksum y TTL*/
+            ospfv2_hdr_t * header_ospfHeader = (ospfv2_hdr_t *) (newPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+            ospfv2_lsu_hdr_t * header_lsuHeader = (ospfv2_lsu_hdr_t *) (newPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t));
+            header_lsuHeader->ttl = header_lsuHeader->ttl - 1;
+            header_ospfHeader->csum = 0;
+            header_ospfHeader->csum = ospfv2_cksum(header_ospfHeader, sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + num_adv * sizeof(ospfv2_lsa_t));
+            /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
+            /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
+            struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), if_list->neighbor_ip);
+            if (entry) {
+                fprintf(stderr,"Se encontro la direcion MAC en el cache 4\n");
+                /* Se usa la direccion MAC para enviar el paquete*/
+                memcpy(header_etherNewPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+                fprintf(stderr,"Se encontro la direcion MAC en el cache 5\n");
 
+                /* Enviar el paquete*/
+                sr_send_packet(sr, newPacket, length, if_list->name);
+                fprintf(stderr,"Se encontro la direcion MAC en el cache 6\n");
+                /* Liberar la entrada ARP*/
                 free(newPacket);
+                fprintf(stderr,"Se encontro la direcion MAC en el cache 7\n");
+                free(entry);
+                fprintf(stderr,"Se encontro la direcion MAC en el cache 8\n");
+            } else {
+                fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
+                /* Poner en cola la solicitud ARP*/
+                struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), if_list->neighbor_ip, newPacket, length, if_list->name);
+                free(newPacket);
+                handle_arpreq(sr, arpRequest); 
+            }
         }
         if_list = if_list->next;
+        fprintf(stderr,"Se encontro la direcion MAC en el cache 9\n");
     };        
 
-    
+    fprintf(stderr,"Se encontro la direcion MAC en el cache 10\n");
             
     return NULL;
 } /* -- sr_handle_pwospf_lsu_packet -- */
