@@ -77,8 +77,6 @@ struct sr_rt* LPM(struct sr_instance *sr, uint32_t destAddr) {
       if(longest_mask <= mask){
       	longest_mask = mask;
         best_match = routing_table;
-        fprintf(stderr,"LLEGO 100\n");
-
       }
 		}
     
@@ -96,25 +94,23 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint8_t *ipPacket)
 {
   /* Se pide memoria para el nuevo paquete (ethernet,ip y icmp)*/
-  fprintf(stderr,"LLEGO 4\n");
 
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
   uint8_t *new_packet = (uint8_t *)malloc(len);
-  fprintf(stderr,"LLEGO 5\n");
 
   /* Se copia la cabecera Ethernet e IP del paquete original */
   memcpy(new_packet, ipPacket , sizeof(sr_ip_hdr_t));
-  fprintf(stderr,"LLEGO 6\n");
 
   /* Consigo la interfaz de salida que fue la misma por la que entro el paquete original*/
   struct sr_rt *lpm_entry = LPM(sr, ipDst);
-  fprintf(stderr,"LLEGO 7\n");
+  if(lpm_entry == NULL){
+    fprintf(stderr,"No se encontro la ruta\n");
+    return;
+  }
   /* Obtengo la interfaz de salida */
-  fprintf(stderr,"LLEGO 8\n");
 
 
   struct sr_if *iface = sr_get_interface(sr, lpm_entry->interface);
-  fprintf(stderr,"LLEGO 9\n");
 
   if(iface->ip == ipDst){
     fprintf(stderr,"El destino es la misma interfaz\n");
@@ -160,15 +156,12 @@ void sr_send_icmp_error_packet(uint8_t type,
   icmp_hdr->icmp_sum = 0;
   icmp_hdr->unused = 0;
   icmp_hdr->next_mtu = 0;
-  fprintf(stderr,"LLEGO 1\n");
 
   /* Se copia la cabecera IP original y los primeros 8 bytes del paquete original */
   memcpy(icmp_hdr->data, ip_hdr, ICMP_DATA_SIZE);
-  fprintf(stderr,"LLEGO 1\n");
 
   /* Se calcula el checksum del paquete ICMP */
   icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
-  fprintf(stderr,"LLEGO 1\n");
 
   
   
@@ -177,11 +170,9 @@ void sr_send_icmp_error_packet(uint8_t type,
       fprintf(stderr,"El destino esta conectado directamente\n");
       gw = ipDst;
   }
-  fprintf(stderr,"LLEGO 1\n");
 
   /*Se busca la direccion MAC en la cache*/
   struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), gw);
-  fprintf(stderr,"LLEGO 1\n");
 
   if (entry) {
     
@@ -189,9 +180,6 @@ void sr_send_icmp_error_packet(uint8_t type,
     memcpy(ether_hdr_new_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
 
     /* Enviar el paquete ICMP */
-    if (code == 3 ){
-      print_hdrs(new_packet,len);
-    }
     sr_send_packet(sr, new_packet, len, iface->name);
 
     /* Liberar la entrada ARP*/
@@ -266,7 +254,6 @@ void sr_send_icmp_echo_reply(struct sr_instance *sr,
   icmp_hdr->icmp_sum = icmp_cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
 
   /* Enviar el paquete ICMP */
-  print_hdrs(new_packet,len);
   sr_send_packet(sr, new_packet, len, iface->name);
 
   /* Liberar memoria */
@@ -286,8 +273,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     Poner en el informe que no verificamos el checksum porque 
     la funcion que llama a esta lo valida con is_valid_packet, 
     el cual verifica en cada cabezal que el checksum esta bien
+    print_hdrs (packet, (uint32_t) len);
   */ 
-  print_hdrs (packet, (uint32_t) len);
  
   sr_ip_hdr_t * ipHeader = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
   struct sr_if * miInterfaz = sr_get_interface_given_ip(sr, ipHeader->ip_dst);
