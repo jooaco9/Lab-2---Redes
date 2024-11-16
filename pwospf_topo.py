@@ -31,14 +31,19 @@ class CS144Topo( Topo ):
         vhost1 = self.addSwitch( 'vhost1' )
         vhost2 = self.addSwitch( 'vhost2' )
         vhost3 = self.addSwitch( 'vhost3' )
+        vhost4 = self.addSwitch( 'vhost4' )
+        vhost5 = self.addSwitch( 'vhost5' )
         client = self.addHost('client')
 
         self.addLink(client, vhost1)
         self.addLink(vhost2, vhost1)
         self.addLink(vhost3, vhost1)        
-        self.addLink(server1, vhost2)
-        self.addLink(server2, vhost3)
+        self.addLink(vhost2, vhost4)
+        self.addLink(vhost3, vhost5)
         self.addLink(vhost3, vhost2)
+        self.addLink(server1, vhost4)
+        self.addLink(server2, vhost5)
+        self.addLink(vhost4, vhost5)
 
 
 class CS144Controller( Controller ):
@@ -96,14 +101,14 @@ def startRPC( host ):
 def stopRPC():
     "Stop RPC servers"
     info( '*** Shutting down stale RPCServers', 
-    quietRun( "pkill -9 -f test-server" ), '\n' )    
+          quietRun( "pkill -9 -f test-server" ), '\n' )    
     
 def set_default_route(host):
     info('*** setting default gateway of host %s\n' % host.name)
     if(host.name == 'server1'):
-        routerip = IP_SETTING['vhost2-eth2']
+        routerip = IP_SETTING['vhost4-eth2']
     elif(host.name == 'server2'):
-        routerip = IP_SETTING['vhost3-eth2']
+        routerip = IP_SETTING['vhost5-eth2']
     elif(host.name == 'client'):
         routerip = IP_SETTING['vhost1-eth1']
     print host.name, routerip

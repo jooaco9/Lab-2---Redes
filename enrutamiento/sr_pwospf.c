@@ -36,6 +36,8 @@ pthread_t g_topology_entries_thread;
 pthread_t g_rx_lsu_thread;
 pthread_t g_dijkstra_thread;
 
+pthread_mutex_t g_dijkstra_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 struct in_addr g_router_id;
 uint8_t g_ospf_multicast_mac[ETHER_ADDR_LEN];
 struct ospfv2_neighbor* g_neighbors;
@@ -252,11 +254,12 @@ void* check_topology_entries_age(void* arg)
             dij_param->topology = g_topology;
             dij_param->rid = g_router_id;
             dij_param->sr = sr;
+            dij_param->mutex = &g_dijkstra_mutex;
             pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, dij_param);
-            pthread_join(g_dijkstra_thread, NULL);
+            /*pthread_join(g_dijkstra_thread, NULL);
+            free(dij_param);*/
             Debug("\n\n TOPOLOGIA ACTUAL: \n");
             print_topolgy_table(g_topology);
-            free(dij_param);
         }
         usleep(1000000);
     }
@@ -490,6 +493,7 @@ void* send_lsu(void* arg)
         header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_lsu_hdr_t) + cantLsa * sizeof(ospfv2_lsa_t));
         header_ipPacket->ip_off = htons(IP_DF);
         header_ipPacket->ip_v = 4;
+        header_ipPacket->ip_hl = 5;
         /* Calculo y seteo el chechsum IP*/
         header_ipPacket->ip_sum = 0;
         header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
@@ -544,14 +548,12 @@ void* send_lsu(void* arg)
         struct sr_arpentry *entry = sr_arpcache_lookup(&(lsu_param->sr->cache), interface->neighbor_ip);
         Debug("Ether_type: %d\n", ntohs(header_etherPacket->ether_type));
         if (entry) {
-            fprintf(stderr,"Se encontro la direcion MAC en el cache 1\n");
+            fprintf(stderr,"Se encontro la direcion MAC en el cache \n");
             /* Se usa la direccion MAC para enviar el paquete*/
             memcpy(header_etherPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-            fprintf(stderr,"Se encontro la direcion MAC en el cache 2\n");
             /* Liberar la entrada ARP*/
             /* Enviar el paquete*/
             sr_send_packet(sr, lsuPkt, len, interface->name);
-            fprintf(stderr,"Se encontro la direcion MAC en el cache 3 \n");
             free(lsuPkt);
             free(entry);
         } else {
@@ -639,7 +641,6 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
         pwospf_lock(sr->ospf_subsys);
         pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
         pwospf_unlock(sr->ospf_subsys);
-        struct sr_if* if_list = sr->if_list;
         /*int cont = 0;
         while(if_list){
             cont++;
@@ -679,7 +680,6 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     uint8_t* packet = rx_lsu_param->packet;
     unsigned int length = rx_lsu_param->length;
     struct sr_if* rx_if = rx_lsu_param->rx_if;
-    free(rx_lsu_param);
     /* Obtengo el vecino que me envió el LSU*/
 
     /* Imprimo info del paquete recibido*/
@@ -759,9 +759,10 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         dij_param->topology = g_topology;
         dij_param->rid = g_router_id;
         dij_param->sr = sr;
+        dij_param->mutex = &g_dijkstra_mutex;
         pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, dij_param);
-        pthread_join(g_dijkstra_thread, NULL);
-        free(dij_param);
+        /*pthread_join(g_dijkstra_thread, NULL);
+        free(dij_param);*/
     }
     /* Flooding del LSU por todas las interfaces menos por donde me llegó */
             /* Seteo MAC de origen */
@@ -770,21 +771,21 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             /* Envío el paquete*/
     struct sr_if* if_list = sr->if_list;
     while(if_list != NULL && lsuHeader->ttl > 1){ 
-        fprintf(stderr,"Se encontro la direcion MAC en el cache 11\n");
         if(if_list->neighbor_id != 0 && if_list->ip != rx_if->ip){
             uint8_t *newPacket = malloc(length);
-            fprintf(stderr,"Se encontro la direcion MAC en el cache 12\n");
             memcpy(newPacket, packet,length);
             /* Ajusto cabezal Ethernet */
             sr_ethernet_hdr_t* header_etherNewPacket = (sr_ethernet_hdr_t*)newPacket;
             /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
             memcpy(header_etherNewPacket->ether_shost, if_list->addr, ETHER_ADDR_LEN);
+            header_etherNewPacket->ether_type = htons(ethertype_ip);
             /* Seteo cabezal IP*/
             sr_ip_hdr_t* header_ipPacket = (sr_ip_hdr_t*)(newPacket + sizeof(sr_ethernet_hdr_t));
             /* La IP destino es la del vecino conectado a mi interfaz*/
             header_ipPacket->ip_dst = if_list->neighbor_ip;
             /* Seteo IP origen con la IP de mi interfaz de salida */
             header_ipPacket->ip_src = if_list->ip;
+            header_ipPacket->ip_ttl = ipHeader->ip_ttl - 1;
             header_ipPacket->ip_sum = 0;
             header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
             /* Ajusto cabezal OSPF: checksum y TTL*/
@@ -797,33 +798,25 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
             struct sr_arpentry *entry = sr_arpcache_lookup(&(sr->cache), if_list->neighbor_ip);
             if (entry) {
-                fprintf(stderr,"Se encontro la direcion MAC en el cache 4\n");
+                fprintf(stderr,"Se encontro la direcion MAC en el cache\n");
                 /* Se usa la direccion MAC para enviar el paquete*/
                 memcpy(header_etherNewPacket->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-                fprintf(stderr,"Se encontro la direcion MAC en el cache 5\n");
 
                 /* Enviar el paquete*/
                 sr_send_packet(sr, newPacket, length, if_list->name);
-                fprintf(stderr,"Se encontro la direcion MAC en el cache 6\n");
                 /* Liberar la entrada ARP*/
-                free(newPacket);
-                fprintf(stderr,"Se encontro la direcion MAC en el cache 7\n");
                 free(entry);
-                fprintf(stderr,"Se encontro la direcion MAC en el cache 8\n");
             } else {
                 fprintf(stderr,"No se encontro la direcion MAC en el cache\n");
                 /* Poner en cola la solicitud ARP*/
                 struct sr_arpreq* arpRequest = sr_arpcache_queuereq(&(sr->cache), if_list->neighbor_ip, newPacket, length, if_list->name);
-                free(newPacket);
                 handle_arpreq(sr, arpRequest); 
             }
+            free(newPacket);
         }
         if_list = if_list->next;
-        fprintf(stderr,"Se encontro la direcion MAC en el cache 9\n");
-    };        
-
-    fprintf(stderr,"Se encontro la direcion MAC en el cache 10\n");
-            
+    }; 
+    free(rx_lsu_param);                   
     return NULL;
 } /* -- sr_handle_pwospf_lsu_packet -- */
 
