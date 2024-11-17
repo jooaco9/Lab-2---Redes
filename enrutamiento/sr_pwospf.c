@@ -357,7 +357,6 @@ void* send_hello_packet(void* arg)
     header_ipPacket->ip_hl = 5;
     header_ipPacket->ip_off = htons(IP_DF);
     header_ipPacket->ip_len = htons(sizeof(sr_ip_hdr_t) + sizeof(ospfv2_hdr_t) + sizeof(ospfv2_hello_hdr_t));
-
     /* Calculo y seteo el chechsum IP*/
     header_ipPacket->ip_sum = 0;
     header_ipPacket->ip_sum = ip_cksum(header_ipPacket, sizeof(sr_ip_hdr_t));
@@ -373,7 +372,6 @@ void* send_hello_packet(void* arg)
     /*Debug("      [Router ID = %s]\n", inet_ntoa(g_router_id));*/
     /* Seteo el Area ID en 0 */
     header_ospfPacket->aid = 0; 
-
     header_ospfPacket->len = htons(sizeof(ospfv2_hdr_t) + sizeof(ospfv2_hello_hdr_t));
     /* Seteo el Authentication Type y Authentication Data en 0*/
     header_ospfPacket->autype = 0;
@@ -517,7 +515,7 @@ void* send_lsu(void* arg)
         header_lsuPacket->ttl = 64;
         header_lsuPacket->unused = 0;
         /* Seteo el número de anuncios con la cantidad de rutas a enviar. Uso función count_routes */
-        header_lsuPacket->num_adv = cantLsa;
+        header_lsuPacket->num_adv = htonl(cantLsa);
         int cont = 0;
         struct sr_rt * ruta = sr->routing_table;
         /* Creo cada LSA iterando en las entradas de la tabla */
@@ -710,7 +708,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
       Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
     }
 
-    int num_adv = lsuHeader->num_adv;
+    int num_adv = ntohl(lsuHeader->num_adv);
     
     /* Itero en los LSA que forman parte del LSU. Para cada uno, actualizo la topología.*/
         /* Obtengo subnet */
