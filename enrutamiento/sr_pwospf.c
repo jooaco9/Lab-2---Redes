@@ -628,7 +628,6 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     rx_if->mask = net_mask.s_addr;
 
     if(ptr == NULL){
-        
         /* Recorro todas las interfaces para enviar el paquete LSU */
         /* Si la interfaz tiene un vecino, envío un LSU */
         Debug("VECINO NUEVO\n");
@@ -639,26 +638,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
         pwospf_lock(sr->ospf_subsys);
         pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
         pwospf_unlock(sr->ospf_subsys);
-        /*int cont = 0;
-        while(if_list){
-            cont++;
-            if(if_list->neighbor_id != 0){
-                Debug("VECINO NUEVO\n");
-                powspf_hello_lsu_param_t* lsu_param = (powspf_hello_lsu_param_t*)malloc(sizeof(powspf_hello_lsu_param_t));
-                lsu_param->sr = sr;
-                lsu_param->interface = if_list;
-                 Bloqueo para evitar mezclar el envío de HELLOs y LSUs 
-                pwospf_lock(sr->ospf_subsys);
-                pthread_create(&g_lsu_thread, NULL, send_lsu, lsu_param);
-                pwospf_unlock(sr->ospf_subsys);
-                Debug("\n\nMANDA UN LSU POR LA NUMERO %d\n", cont);
-            }
-            else{
-                Debug("\n\nNO MANDA UN LSU , NO TIENE VECINO POR LA NUMERO %d\n", cont);
-            }
-            if_list = if_list->next;
-        };      */
-        /* Desbloqueo */
+       
     }
 } /* -- sr_handle_pwospf_hello_packet -- */
 
@@ -694,22 +674,23 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     
     /* Chequeo checksum */
     if (ospfHeader->csum != ospfv2_cksum(ospfHeader, length - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t))) {
-      Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");
-      return NULL;
+        Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");
+        free(rx_lsu_param);
+        return NULL;
     }
 
     /* Obtengo el Router ID del router originario del LSU y chequeo si no es mío */
     if (neighbor_id == g_router_id.s_addr) {
-      Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");
+        Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");
+        free(rx_lsu_param);
       return NULL;
     }
 
     /* Obtengo el número de secuencia y uso check_sequence_number para ver si ya lo recibí desde ese vecino */
     if (!check_sequence_number(g_topology,neighbor_id_addr, lsuHeader->seq)) {
-      Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
-      pwospf_unlock(sr->ospf_subsys);
-      free(rx_lsu_param);
-      return NULL;
+        Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
+        free(rx_lsu_param);
+        return NULL;
     }
 
     int num_adv = ntohl(lsuHeader->num_adv);
@@ -760,6 +741,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             /* Ajusto cabezal OSPF: checksum y TTL*/
             /* Envío el paquete*/
     struct sr_if* if_list = sr->if_list;
+    pwospf_lock(sr->ospf_subsys);
     while(if_list != NULL && lsuHeader->ttl > 1){ 
 
         if (if_list->neighbor_id == 0 || if_list->ip == rx_if->ip) {
@@ -819,8 +801,8 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         free(newPacket);
         if_list = if_list->next;
     }
-    
     pwospf_unlock(sr->ospf_subsys);
+    
     free(rx_lsu_param);                   
     return NULL;
 } /* -- sr_handle_pwospf_lsu_packet -- */
